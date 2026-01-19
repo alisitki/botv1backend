@@ -1,0 +1,830 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "Trading Bot API",
+        "description": "API for managing trading bot watches, trades, and portfolio metrics.",
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "http://localhost:3000",
+            "description": "Local development server"
+        }
+    ],
+    "paths": {
+        "/health": {
+            "get": {
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "ok": {
+                                            "type": "boolean"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/state": {
+            "get": {
+                "summary": "Get current bot state",
+                "responses": {
+                    "200": {
+                        "description": "Current state",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/StateResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/watches": {
+            "get": {
+                "summary": "List all watches",
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "schema": {
+                            "type": "integer",
+                            "default": 200
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of watches",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/WatchResponse"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "summary": "Create a new watch",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/WatchCreateInput"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Watch created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WatchResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/watches/{id}/pause": {
+            "post": {
+                "summary": "Pause a watch",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Watch paused",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WatchResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/watches/{id}/resume": {
+            "post": {
+                "summary": "Resume a watch",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Watch resumed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WatchResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/watches/{id}/sell": {
+            "post": {
+                "summary": "Trigger manual sell for a watch",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Sell triggered",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WatchResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/trades": {
+            "get": {
+                "summary": "List recent trades",
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "schema": {
+                            "type": "integer",
+                            "default": 200
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of trades",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/TradeResponse"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/portfolio": {
+            "get": {
+                "summary": "Get portfolio metrics and equity curve",
+                "responses": {
+                    "200": {
+                        "description": "Portfolio data",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PortfolioResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/events": {
+            "get": {
+                "summary": "List audit events",
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "schema": {
+                            "type": "integer",
+                            "default": 200
+                        }
+                    },
+                    {
+                        "name": "watch_id",
+                        "in": "query",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of events",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/EventResponse"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/signals": {
+            "get": {
+                "summary": "Get recent trading signals",
+                "responses": {
+                    "200": {
+                        "description": "List of signals",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/SignalResponse"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/settings": {
+            "get": {
+                "summary": "Get bot settings",
+                "responses": {
+                    "200": {
+                        "description": "Current settings",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SettingsResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "summary": "Update bot settings",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SettingsUpdate"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Settings updated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SettingsResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/audit": {
+            "get": {
+                "summary": "Get system audit logs",
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "schema": {
+                            "type": "integer",
+                            "default": 200
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Audit logs",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/stream": {
+            "get": {
+                "summary": "SSE Stream for real-time updates",
+                "description": "Server-Sent Events stream. Pushes 'state' (1s), 'watches' (2s), and 'events' (on change).",
+                "responses": {
+                    "200": {
+                        "description": "Event stream",
+                        "content": {
+                            "text/event-stream": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/dev/price": {
+            "post": {
+                "summary": "Manual price override (DEV ONLY)",
+                "description": "Sets a mock price for a symbol in worker_prices.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "symbol": {
+                                        "type": "string"
+                                    },
+                                    "price": {
+                                        "type": "number"
+                                    }
+                                },
+                                "required": [
+                                    "symbol",
+                                    "price"
+                                ]
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Price set",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "ok": {
+                                            "type": "boolean"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "StateResponse": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string"
+                    },
+                    "timeframe": {
+                        "type": "string"
+                    },
+                    "price": {
+                        "type": "number"
+                    },
+                    "latency_ms": {
+                        "type": "integer"
+                    },
+                    "connected": {
+                        "type": "boolean"
+                    },
+                    "mode": {
+                        "enum": [
+                            "PAPER",
+                            "LIVE"
+                        ]
+                    },
+                    "equity_usdt": {
+                        "type": "number"
+                    },
+                    "pnl_total_usdt": {
+                        "type": "number"
+                    },
+                    "pnl_realized_usdt": {
+                        "type": "number"
+                    },
+                    "pnl_unrealized_usdt": {
+                        "type": "number"
+                    },
+                    "today_pnl_usdt": {
+                        "type": "number"
+                    }
+                }
+            },
+            "WatchResponse": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "symbol": {
+                        "type": "string"
+                    },
+                    "mode": {
+                        "enum": [
+                            "PAPER",
+                            "LIVE"
+                        ]
+                    },
+                    "status": {
+                        "enum": [
+                            "WATCHING",
+                            "PAUSED",
+                            "SOLD",
+                            "STOPPED"
+                        ]
+                    },
+                    "entry_price": {
+                        "type": "number"
+                    },
+                    "amount_usdt": {
+                        "type": "number"
+                    },
+                    "qty": {
+                        "type": "number"
+                    },
+                    "tp_mode": {
+                        "enum": [
+                            "FIXED",
+                            "TRAIL"
+                        ]
+                    },
+                    "tp_percent": {
+                        "type": "number"
+                    },
+                    "trailing_step_percent": {
+                        "type": "number",
+                        "nullable": true
+                    },
+                    "peak_price": {
+                        "type": "number",
+                        "nullable": true
+                    },
+                    "current_tp_price": {
+                        "type": "number",
+                        "nullable": true
+                    },
+                    "current_price": {
+                        "type": "number"
+                    },
+                    "unrealized_pnl_usdt": {
+                        "type": "number"
+                    },
+                    "created_at": {
+                        "type": "integer"
+                    },
+                    "updated_at": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "WatchCreateInput": {
+                "type": "object",
+                "required": [
+                    "tp_mode",
+                    "tp_percent"
+                ],
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "default": "BTCUSDT"
+                    },
+                    "mode": {
+                        "enum": [
+                            "PAPER",
+                            "LIVE"
+                        ],
+                        "default": "PAPER"
+                    },
+                    "entry_price": {
+                        "type": "number"
+                    },
+                    "amount_usdt": {
+                        "type": "number"
+                    },
+                    "tp_mode": {
+                        "enum": [
+                            "FIXED",
+                            "TRAIL"
+                        ]
+                    },
+                    "tp_percent": {
+                        "type": "number"
+                    },
+                    "trailing_step_percent": {
+                        "type": "number"
+                    }
+                }
+            },
+            "TradeResponse": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "watch_id": {
+                        "type": "string"
+                    },
+                    "symbol": {
+                        "type": "string"
+                    },
+                    "side": {
+                        "enum": [
+                            "BUY",
+                            "SELL"
+                        ]
+                    },
+                    "qty": {
+                        "type": "number"
+                    },
+                    "price": {
+                        "type": "number"
+                    },
+                    "fee_usdt": {
+                        "type": "number"
+                    },
+                    "pnl_usdt": {
+                        "type": "number"
+                    },
+                    "ts": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "PortfolioResponse": {
+                "type": "object",
+                "properties": {
+                    "equity_usdt": {
+                        "type": "number"
+                    },
+                    "pnl_total_usdt": {
+                        "type": "number"
+                    },
+                    "pnl_realized_usdt": {
+                        "type": "number"
+                    },
+                    "pnl_unrealized_usdt": {
+                        "type": "number"
+                    },
+                    "win_rate": {
+                        "type": "number"
+                    },
+                    "max_drawdown": {
+                        "type": "number"
+                    },
+                    "profit_factor": {
+                        "type": "number"
+                    },
+                    "equity_curve": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "ts": {
+                                    "type": "integer"
+                                },
+                                "equity": {
+                                    "type": "number"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "EventResponse": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "watch_id": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "type": {
+                        "type": "string"
+                    },
+                    "payload": {
+                        "type": "object"
+                    },
+                    "ts": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "SignalResponse": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "symbol": {
+                        "type": "string"
+                    },
+                    "strength": {
+                        "type": "number"
+                    },
+                    "reasons": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "suggested_entry_range": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        },
+                        "minItems": 2,
+                        "maxItems": 2
+                    },
+                    "suggested_tp_range": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        },
+                        "minItems": 2,
+                        "maxItems": 2
+                    },
+                    "ts": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "SettingsResponse": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "enum": [
+                            "PAPER",
+                            "LIVE"
+                        ]
+                    },
+                    "active_symbol": {
+                        "type": "string"
+                    },
+                    "timeframe": {
+                        "type": "string"
+                    },
+                    "paper_equity_usdt": {
+                        "type": "number"
+                    },
+                    "paper_fee_bps": {
+                        "type": "integer"
+                    },
+                    "binance_api_key": {
+                        "type": "string"
+                    },
+                    "binance_testnet": {
+                        "type": "boolean"
+                    },
+                    "live_enabled": {
+                        "type": "boolean"
+                    },
+                    "live_max_order_usdt": {
+                        "type": "number"
+                    },
+                    "live_allow_symbols": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "telegram_enabled": {
+                        "type": "boolean"
+                    },
+                    "telegram_bot_token": {
+                        "type": "string"
+                    },
+                    "telegram_chat_id": {
+                        "type": "string"
+                    },
+                    "telegram_notify_on": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "SettingsUpdate": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "enum": [
+                            "PAPER",
+                            "LIVE"
+                        ]
+                    },
+                    "active_symbol": {
+                        "type": "string"
+                    },
+                    "timeframe": {
+                        "type": "string"
+                    },
+                    "paper_equity_usdt": {
+                        "type": "number"
+                    },
+                    "paper_fee_bps": {
+                        "type": "integer"
+                    },
+                    "binance_api_key": {
+                        "type": "string"
+                    },
+                    "binance_api_secret": {
+                        "type": "string"
+                    },
+                    "binance_testnet": {
+                        "type": "boolean"
+                    },
+                    "live_enabled": {
+                        "type": "boolean"
+                    },
+                    "live_max_order_usdt": {
+                        "type": "number"
+                    },
+                    "live_allow_symbols": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "telegram_enabled": {
+                        "type": "boolean"
+                    },
+                    "telegram_bot_token": {
+                        "type": "string"
+                    },
+                    "telegram_chat_id": {
+                        "type": "string"
+                    },
+                    "telegram_notify_on": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
