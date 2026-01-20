@@ -4,13 +4,15 @@ import { limitQuerySchema, TradeResponse } from '../schemas/index.js';
 
 export default async function tradesRoute(app: FastifyInstance) {
     app.get('/trades', async (request: FastifyRequest): Promise<TradeResponse[]> => {
+        const userId = request.session.get('userId')!;
         const { limit } = limitQuerySchema.parse(request.query);
 
         const trades = db.prepare(`
             SELECT * FROM trades 
+            WHERE user_id = ?
             ORDER BY created_at DESC 
             LIMIT ?
-        `).all(limit) as Trade[];
+        `).all(userId, limit) as Trade[];
 
         // FAZ 1.1 + FAZ 5: Map to UI contract format
         return trades.map(trade => ({

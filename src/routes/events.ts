@@ -4,13 +4,14 @@ import { eventsQuerySchema, EventResponse } from '../schemas/index.js';
 
 export default async function eventsRoute(app: FastifyInstance) {
     app.get('/events', async (request: FastifyRequest): Promise<EventResponse[]> => {
+        const userId = request.session.get('userId')!;
         const { limit, watch_id } = eventsQuerySchema.parse(request.query);
 
-        let query = 'SELECT * FROM events';
-        const params: (number | string)[] = [];
+        let query = 'SELECT * FROM events WHERE user_id = ?';
+        const params: (number | string)[] = [userId];
 
         if (watch_id !== undefined) {
-            query += ' WHERE watch_id = ?';
+            query += ' AND watch_id = ?';
             params.push(watch_id);
         }
 

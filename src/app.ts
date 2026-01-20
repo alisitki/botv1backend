@@ -1,15 +1,16 @@
-// FAZ 7: App with OpenAPI, Swagger UI, and Operational Hardening
-
 import Fastify, { FastifyInstance, FastifyError, FastifyRequest, FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
+import cookie from '@fastify/cookie';
+import session from '@fastify/session';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { ZodError } from 'zod';
 import type { ErrorResponse } from './schemas/index.js';
+import { SQLiteSessionStore } from './utils/sessionStore.js';
 
 // ES modules __dirname equivalent
 const __filename = fileURLToPath(import.meta.url);
@@ -30,21 +31,48 @@ import metricsRoute from './routes/metrics.js';
 import notifyRoute from './routes/notify.js';
 import ohlcRoute from './routes/ohlc.js';
 import streamRoute from './routes/stream.js';
+import authRoutes from './routes/auth.js';
+import secretsRoutes from './routes/secrets.js';
+import adminRoutes from './routes/admin.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
     const app = Fastify({
         logger: true,
-        trustProxy: process.env.TRUST_PROXY === 'true', // FAZ 8: Trust Proxy
+        trustProxy: process.env.TRUST_PROXY === 'true',
+    });
+
+    // CORS - only allow specific origin, no wildcard
+    const corsOrigin = process.env.CORS_ORIGIN || 'https://kaptanbotui.vercel.app';
+    await app.register(cors, {
+        origin: corsOrigin.split(','),
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        credentials: true, // Required for sessions
+    });
+
+    // Cookie & Session
+    await app.register(cookie);
+    await app.register(session, {
+        secret: process.env.SESSION_SECRET || 'a-very-long-and-secure-random-secret-key-1234567890',
+        cookieName: 'sessionId',
+        cookie: {
+            secure: process.env.NODE_ENV === 'production',
+            httpOnly: true,
+            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+            path: '/',
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        },
+        store: new SQLiteSessionStore(),
     });
 
     // FAZ 8: Authentication & IP Allowlist Middleware
     const ipAllowlist = process.env.IP_ALLOWLIST ? process.env.IP_ALLOWLIST.split(',') : [];
-    const requireAuth = process.env.REQUIRE_AUTH === 'true';
-    const adminToken = process.env.ADMIN_TOKEN;
 
     app.addHook('onRequest', async (request, reply) => {
         if (request.method === 'OPTIONS') return; // Skip auth for CORS preflight
         if (request.url === '/health') return; // Always allow health check
+
+        // Skip auth for login/register
+        if (request.url === '/auth/login' || request.url === '/auth/register') return;
 
         // 1. IP Allowlist (Always checked if configured)
         if (ipAllowlist.length > 0) {
@@ -57,23 +85,16 @@ export async function buildApp(): Promise<FastifyInstance> {
             }
         }
 
-        // 2. Token Auth (If enabled)
-        if (requireAuth && adminToken) {
-            // SSE Auth: Allow token in query string for /v1/stream
-            if (request.url.startsWith('/v1/stream')) {
-                const query = request.query as { token?: string };
-                if (query.token === adminToken) return;
-                return reply.status(401).send({ error: 'UNAUTHORIZED', message: 'Invalid SSE token' });
-            }
+        // 2. Session Auth
+        // Exclude /docs and /openapi.json from strict auth if needed
+        if (request.url.startsWith('/docs') || request.url === '/openapi.json') return;
 
-            // Standard Auth: Authorization header (Bearer)
-            const authHeader = request.headers.authorization;
-            if (!authHeader || !authHeader.startsWith('Bearer ') || authHeader.split(' ')[1] !== adminToken) {
-                return reply.status(401).send({
-                    error: 'UNAUTHORIZED',
-                    message: 'Authentication required',
-                });
-            }
+        const userId = request.session.get('userId');
+        if (!userId) {
+            return reply.status(401).send({
+                error: 'UNAUTHORIZED',
+                message: 'Authentication required',
+            });
         }
     });
 
@@ -98,14 +119,6 @@ export async function buildApp(): Promise<FastifyInstance> {
         return reply.type('application/json').send(openapiSpec);
     });
 
-    // FAZ 6: CORS with ENV config
-    const corsOrigin = process.env.CORS_ORIGIN || '*';
-    await app.register(cors, {
-        origin: corsOrigin === '*' ? true : corsOrigin.split(','),
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        credentials: false,
-    });
-
     // FAZ 6: Rate limiting
     await app.register(rateLimit, {
         max: 60,
@@ -113,8 +126,6 @@ export async function buildApp(): Promise<FastifyInstance> {
         keyGenerator: (request: FastifyRequest) => {
             return request.ip;
         },
-        // In @fastify/rate-limit v9, skip is replaced/handled or we use allowList
-        // Using a function for allowList to simulate skip
         allowList: (request: FastifyRequest) => {
             return request.url === '/v1/stream' || request.url === '/health' || request.url.startsWith('/docs') || request.url.startsWith('/v1/ohlc');
         },
@@ -132,7 +143,6 @@ export async function buildApp(): Promise<FastifyInstance> {
             message: 'An unexpected error occurred',
         };
 
-        // FAZ 6: Handle Rate Limit errors specifically
         if ('error' in error && (error as any).error === 'RATE_LIMIT_EXCEEDED') {
             return reply.status(429).send({
                 error: 'RATE_LIMIT_EXCEEDED',
@@ -140,7 +150,6 @@ export async function buildApp(): Promise<FastifyInstance> {
             });
         }
 
-        // Handle Zod validation errors
         if (error instanceof ZodError) {
             response.error = 'VALIDATION_ERROR';
             response.message = 'Invalid request data';
@@ -151,20 +160,20 @@ export async function buildApp(): Promise<FastifyInstance> {
             return reply.status(400).send(response);
         }
 
-        // Handle Fastify errors
         if ('statusCode' in error && error.statusCode) {
             response.error = error.code || 'REQUEST_ERROR';
             response.message = (error as any).message || error.message;
             return reply.status(error.statusCode).send(response);
         }
 
-        // Log unexpected errors
         request.log.error(error);
         return reply.status(500).send(response);
     });
 
     // Register routes
     await app.register(healthRoute);
+    await app.register(authRoutes, { prefix: '/auth' });
+    await app.register(secretsRoutes, { prefix: '/v1' });
     await app.register(stateRoute, { prefix: '/v1' });
     await app.register(watchesRoute, { prefix: '/v1' });
     await app.register(tradesRoute, { prefix: '/v1' });
@@ -178,6 +187,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await app.register(streamRoute, { prefix: '/v1' });
     await app.register(notifyRoute, { prefix: '/v1' });
     await app.register(ohlcRoute, { prefix: '/v1' });
+    await app.register(adminRoutes, { prefix: '/v1' });
 
     return app;
 }

@@ -37,6 +37,9 @@ async function start() {
         console.log('  GET  /v1/audit');
         console.log('  GET  /v1/metrics/debug');
         console.log('  GET  /v1/stream (SSE)');
+        console.log('  POST /v1/admin/active-user');
+        console.log('  GET  /v1/admin/active-user');
+        console.log('  DELETE /v1/admin/active-user');
         console.log('');
     } catch (err) {
         console.error('Failed to start server:', err);

@@ -14,3 +14,6 @@ data/*.db-shm
 
 # Logs
 *.log
+
+# Cookies
+cookies*.txt

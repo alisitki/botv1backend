@@ -1,8 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import db, { getMeta } from '../db/index.js';
+import db, { getUserSettings, getMeta } from '../db/index.js';
 import { z } from 'zod';
 
-// FAZ 3: Dev price override schema with optional symbol
 const devPriceSchema = z.object({
     symbol: z.string().min(1).optional(),
     price: z.number().positive(),
@@ -15,6 +14,7 @@ const devPriceQuerySchema = z.object({
 export default async function devRoute(app: FastifyInstance) {
     // POST /v1/dev/price - Set dev price override for testing
     app.post('/dev/price', async (request: FastifyRequest, reply: FastifyReply) => {
+        const userId = request.session.get('userId')!;
         const nodeEnv = process.env.NODE_ENV || 'development';
         if (nodeEnv === 'production') {
             return reply.status(403).send({
@@ -23,8 +23,9 @@ export default async function devRoute(app: FastifyInstance) {
             });
         }
 
-        const modeRow = db.prepare('SELECT value FROM meta WHERE key = ?').get('mode') as { value: string } | undefined;
-        const mode = modeRow?.value || 'PAPER';
+        const settingsRow = getUserSettings(userId);
+        const s = settingsRow ? JSON.parse(settingsRow.settings_json) : {};
+        const mode = s.mode || 'PAPER';
 
         if (mode !== 'PAPER') {
             return reply.status(403).send({
@@ -34,12 +35,10 @@ export default async function devRoute(app: FastifyInstance) {
         }
 
         const input = devPriceSchema.parse(request.body);
-
-        // FAZ 3: Use symbol from body or default to active_symbol
-        const activeSymbol = getMeta('active_symbol') || getMeta('symbol') || 'BTCUSDT';
+        const activeSymbol = s.active_symbol || 'BTCUSDT';
         const symbol = (input.symbol || activeSymbol).toUpperCase();
 
-        // Store per-symbol dev price override
+        // Store per-symbol dev price override (Global for now, as worker is global)
         db.prepare(`
             INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)
         `).run(`dev_price_override_${symbol}`, input.price.toString());
@@ -56,8 +55,6 @@ export default async function devRoute(app: FastifyInstance) {
                 updated_at = excluded.updated_at
         `).run(symbol, input.price, now);
 
-        console.log(`🔧 DEV: Price override for ${symbol} set to ${input.price}`);
-
         return {
             success: true,
             symbol,
@@ -68,6 +65,7 @@ export default async function devRoute(app: FastifyInstance) {
 
     // DELETE /v1/dev/price - Clear dev price override
     app.delete('/dev/price', async (request: FastifyRequest, reply: FastifyReply) => {
+        const userId = request.session.get('userId')!;
         const nodeEnv = process.env.NODE_ENV || 'development';
         if (nodeEnv === 'production') {
             return reply.status(403).send({
@@ -77,13 +75,13 @@ export default async function devRoute(app: FastifyInstance) {
         }
 
         const query = devPriceQuerySchema.parse(request.query);
-        const activeSymbol = getMeta('active_symbol') || getMeta('symbol') || 'BTCUSDT';
+        const settingsRow = getUserSettings(userId);
+        const s = settingsRow ? JSON.parse(settingsRow.settings_json) : {};
+        const activeSymbol = s.active_symbol || 'BTCUSDT';
         const symbol = (query.symbol || activeSymbol).toUpperCase();
 
-        // Remove per-symbol dev price override
         db.prepare(`DELETE FROM meta WHERE key = ?`).run(`dev_price_override_${symbol}`);
 
-        // Also remove legacy single override if clearing default symbol
         if (!query.symbol) {
             db.prepare(`DELETE FROM meta WHERE key = 'dev_price_override'`).run();
         }

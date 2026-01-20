@@ -9,7 +9,8 @@ const auditQuerySchema = z.object({
 export default async function auditRoute(app: FastifyInstance) {
     // GET /v1/audit - Get audit logs
     app.get('/audit', async (request: FastifyRequest): Promise<AuditLogEntry[]> => {
+        const userId = request.session.get('userId')!;
         const { limit } = auditQuerySchema.parse(request.query);
-        return getAuditLogs(limit);
+        return getAuditLogs(userId, limit);
     });
 }

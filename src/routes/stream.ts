@@ -1,7 +1,7 @@
 // FAZ 6: SSE Stream Endpoint
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import db, { getMeta, Watch, Trade } from '../db/index.js';
+import db, { getUserSettings, Watch } from '../db/index.js';
 
 // Helpers from other routes (duplicated for simplicity)
 function getWorkerPrice(symbol: string): { price: number; latency_ms: number; connected: boolean; updated_at: number } | null {
@@ -27,22 +27,25 @@ function getStartOfToday(): number {
     return Math.floor(startOfDay.getTime() / 1000);
 }
 
-function getState() {
-    const mode = getMeta('mode') || 'PAPER';
-    const symbol = getMeta('active_symbol') || getMeta('symbol') || 'BTCUSDT';
-    const timeframe = getMeta('timeframe') || '15m';
-    const paperEquity = parseFloat(getMeta('paper_equity_usdt') || getMeta('equity') || '17000');
+function getState(userId: string) {
+    const settingsRow = getUserSettings(userId);
+    const s = settingsRow ? JSON.parse(settingsRow.settings_json) : {};
+
+    const mode = s.mode || 'PAPER';
+    const symbol = s.active_symbol || 'BTCUSDT';
+    const timeframe = s.timeframe || '15m';
+    const paperEquity = s.paper_equity_usdt || 17000;
 
     const priceData = getWorkerPrice(symbol);
 
     const sellTrades = db.prepare(`
-        SELECT SUM(pnl) as total FROM trades WHERE side = 'SELL'
-    `).get() as { total: number | null };
+        SELECT SUM(pnl) as total FROM trades WHERE side = 'SELL' AND user_id = ?
+    `).get(userId) as { total: number | null };
     const pnlRealized = sellTrades?.total || 0;
 
     const activeWatches = db.prepare(`
-        SELECT * FROM watches WHERE status = 'ACTIVE'
-    `).all() as Watch[];
+        SELECT * FROM watches WHERE status = 'ACTIVE' AND user_id = ?
+    `).all(userId) as Watch[];
 
     let pnlUnrealized = 0;
     for (const watch of activeWatches) {
@@ -60,8 +63,8 @@ function getState() {
 
     const startOfToday = getStartOfToday();
     const todaySells = db.prepare(`
-        SELECT SUM(pnl) as total FROM trades WHERE side = 'SELL' AND created_at >= ?
-    `).get(startOfToday) as { total: number | null };
+        SELECT SUM(pnl) as total FROM trades WHERE side = 'SELL' AND created_at >= ? AND user_id = ?
+    `).get(startOfToday, userId) as { total: number | null };
     const todayPnl = todaySells?.total || 0;
 
     const now = Math.floor(Date.now() / 1000);
@@ -82,8 +85,8 @@ function getState() {
     };
 }
 
-function getWatches() {
-    const watches = db.prepare('SELECT * FROM watches ORDER BY created_at DESC').all() as Watch[];
+function getWatches(userId: string) {
+    const watches = db.prepare('SELECT * FROM watches WHERE user_id = ? ORDER BY created_at DESC').all(userId) as Watch[];
     return watches.map(watch => {
         const statusMap: Record<string, string> = {
             'ACTIVE': 'WATCHING',
@@ -122,10 +125,10 @@ function getWatches() {
     });
 }
 
-function getRecentEvents(limit: number = 10) {
+function getRecentEvents(userId: string, limit: number = 10) {
     const events = db.prepare(`
-        SELECT * FROM events ORDER BY created_at DESC LIMIT ?
-    `).all(limit) as Array<{
+        SELECT * FROM events WHERE user_id = ? ORDER BY created_at DESC LIMIT ?
+    `).all(userId, limit) as Array<{
         id: number;
         watch_id: number | null;
         type: string;
@@ -142,8 +145,8 @@ function getRecentEvents(limit: number = 10) {
     }));
 }
 
-function getLastEventId(): number {
-    const row = db.prepare('SELECT id FROM events ORDER BY id DESC LIMIT 1').get() as { id: number } | undefined;
+function getLastEventId(userId: string): number {
+    const row = db.prepare('SELECT id FROM events WHERE user_id = ? ORDER BY id DESC LIMIT 1').get(userId) as { id: number } | undefined;
     return row?.id || 0;
 }
 
@@ -160,6 +163,7 @@ let heartbeatsSent = 0;
 export default async function streamRoute(app: FastifyInstance) {
     // GET /v1/stream - SSE endpoint
     app.get('/stream', async (request: FastifyRequest, reply: FastifyReply) => {
+        const userId = request.session.get('userId')!;
         activeConnections++;
 
         const hbSeconds = parseInt(process.env.SSE_HEARTBEAT_SECONDS || '15', 10);
@@ -170,22 +174,21 @@ export default async function streamRoute(app: FastifyInstance) {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache, no-transform',
             'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no',  // Disable nginx buffering
-            'Access-Control-Allow-Origin': 'https://kaptanbotui.vercel.app',
+            'X-Accel-Buffering': 'no',
             'Vary': 'Origin',
         });
 
         // Send retry and initial heartbeat/ping
         reply.raw.write(`retry: ${retryMs}\n`);
-        reply.raw.write(': connected\n\n'); // Immediate comment to flush
+        reply.raw.write(': connected\n\n');
 
         // Initial push
-        reply.raw.write(formatSSE('state', getState()));
-        reply.raw.write(formatSSE('watches', getWatches()));
-        reply.raw.write(formatSSE('events', getRecentEvents(10)));
+        reply.raw.write(formatSSE('state', getState(userId)));
+        reply.raw.write(formatSSE('watches', getWatches(userId)));
+        reply.raw.write(formatSSE('events', getRecentEvents(userId, 10)));
         eventsDelivered += 3;
 
-        let lastEventId = getLastEventId();
+        let lastSeenEventId = getLastEventId(userId);
         let stateCounter = 0;
         let watchesCounter = 0;
         let lastOutputTime = Date.now();
@@ -199,7 +202,7 @@ export default async function streamRoute(app: FastifyInstance) {
                 // 1. State every 1s
                 stateCounter++;
                 if (stateCounter >= 1) {
-                    reply.raw.write(formatSSE('state', getState()));
+                    reply.raw.write(formatSSE('state', getState(userId)));
                     stateCounter = 0;
                     eventSent = true;
                 }
@@ -207,16 +210,16 @@ export default async function streamRoute(app: FastifyInstance) {
                 // 2. Watches every 2s
                 watchesCounter++;
                 if (watchesCounter >= 2) {
-                    reply.raw.write(formatSSE('watches', getWatches()));
+                    reply.raw.write(formatSSE('watches', getWatches(userId)));
                     watchesCounter = 0;
                     eventSent = true;
                 }
 
-                // 3. Check for new database events
-                const currentEventId = getLastEventId();
-                if (currentEventId > lastEventId) {
-                    reply.raw.write(formatSSE('events', getRecentEvents(10)));
-                    lastEventId = currentEventId;
+                // 3. Check for new database events for this user
+                const currentEventId = getLastEventId(userId);
+                if (currentEventId > lastSeenEventId) {
+                    reply.raw.write(formatSSE('events', getRecentEvents(userId, 10)));
+                    lastSeenEventId = currentEventId;
                     eventSent = true;
                 }
 

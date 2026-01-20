@@ -1,7 +1,5 @@
-// FAZ 5: Metrics Debug Endpoint (non-production only)
-
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import db, { getMeta } from '../db/index.js';
+import db, { getUserSettings } from '../db/index.js';
 
 interface MetricsDebugResponse {
     realized_pnl_usdt: number;
@@ -68,9 +66,12 @@ function calculateMaxDrawdown(equityCurve: EquityCurveRow[]): number {
     return Math.round(maxDrawdown * 10000) / 10000;  // 4 decimal places
 }
 
+export { getStartOfToday, calculateMaxDrawdown };
+
 export default async function metricsRoute(app: FastifyInstance) {
     // GET /v1/metrics/debug - Debug metrics (non-production only)
     app.get('/metrics/debug', async (request: FastifyRequest, reply: FastifyReply): Promise<MetricsDebugResponse> => {
+        const userId = request.session.get('userId')!;
         const nodeEnv = process.env.NODE_ENV || 'development';
         if (nodeEnv === 'production') {
             return reply.status(403).send({
@@ -79,10 +80,10 @@ export default async function metricsRoute(app: FastifyInstance) {
             });
         }
 
-        // Get all SELL trades for realized PnL
+        // Get all SELL trades for realized PnL for this user
         const sellTrades = db.prepare(`
-            SELECT * FROM trades WHERE side = 'SELL' ORDER BY created_at DESC
-        `).all() as TradeRow[];
+            SELECT * FROM trades WHERE side = 'SELL' AND user_id = ? ORDER BY created_at DESC
+        `).all(userId) as TradeRow[];
 
         // Calculate realized PnL, gross profit/loss
         let realized = 0;
@@ -105,16 +106,16 @@ export default async function metricsRoute(app: FastifyInstance) {
             }
         }
 
-        // Get all trades for total fees
-        const allTrades = db.prepare('SELECT * FROM trades').all() as TradeRow[];
+        // Get all trades for total fees for this user
+        const allTrades = db.prepare('SELECT * FROM trades WHERE user_id = ?').all(userId) as TradeRow[];
         for (const trade of allTrades) {
             totalFees += trade.fee || 0;
         }
 
-        // Calculate unrealized PnL from WATCHING watches
+        // Calculate unrealized PnL from WATCHING watches for this user
         const activeWatches = db.prepare(`
-            SELECT * FROM watches WHERE status = 'ACTIVE'
-        `).all() as Array<{
+            SELECT * FROM watches WHERE status = 'ACTIVE' AND user_id = ?
+        `).all(userId) as Array<{
             id: number;
             symbol: string;
             entry_price: number;
@@ -129,22 +130,24 @@ export default async function metricsRoute(app: FastifyInstance) {
             unrealized += watch.unrealized_pnl || 0;
         }
 
-        // Today's PnL
+        // Today's PnL for this user
         const startOfToday = getStartOfToday();
         const todaySells = db.prepare(`
-            SELECT SUM(pnl) as total FROM trades WHERE side = 'SELL' AND created_at >= ?
-        `).get(startOfToday) as { total: number | null };
+            SELECT SUM(pnl) as total FROM trades WHERE side = 'SELL' AND created_at >= ? AND user_id = ?
+        `).get(startOfToday, userId) as { total: number | null };
         const todayPnl = todaySells?.total || 0;
 
-        // Equity curve and max drawdown
+        // Equity curve and max drawdown for this user
         const equityCurve = db.prepare(`
-            SELECT ts, equity FROM equity_curve ORDER BY ts ASC
-        `).all() as EquityCurveRow[];
+            SELECT ts, equity FROM equity_curve WHERE user_id = ? ORDER BY ts ASC
+        `).all(userId) as EquityCurveRow[];
 
         const maxDrawdown = calculateMaxDrawdown(equityCurve);
 
-        // Portfolio values
-        const paperEquity = parseFloat(getMeta('paper_equity_usdt') || getMeta('equity') || '17000');
+        // Portfolio values for this user
+        const settingsRow = getUserSettings(userId);
+        const s = settingsRow ? JSON.parse(settingsRow.settings_json) : {};
+        const paperEquity = s.paper_equity_usdt || 17000;
         const equity = paperEquity + realized + unrealized;
 
         // Calculations
@@ -173,6 +176,3 @@ export default async function metricsRoute(app: FastifyInstance) {
         };
     });
 }
-
-// Export helper functions for use in other routes
-export { getStartOfToday, calculateMaxDrawdown };

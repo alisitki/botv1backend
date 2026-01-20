@@ -47,6 +47,43 @@ try {
 
 console.log('✅ Schema created/verified');
 
+// Run Migration 2.0
+const migrate2Path = path.join(__dirname, 'migrate_2_0.sql');
+if (fs.existsSync(migrate2Path)) {
+    console.log('🔄 Running Migration 2.0...');
+    const migrate2 = fs.readFileSync(migrate2Path, 'utf-8');
+    try {
+        db.exec(migrate2);
+        console.log('✅ Migration 2.0 complete');
+    } catch (err) {
+        const error = err as Error;
+        if (!error.message.includes('duplicate column name')) {
+            console.error('❌ Migration 2.0 failed:', error.message);
+            // We ignore duplicate column errors to allow re-running
+        } else {
+            console.log('✅ Migration 2.0 already applied (columns exist)');
+        }
+    }
+}
+
+// Run Migration 3.0 (Multi-user portfolio)
+const migrate3Path = path.join(__dirname, 'migrate_3_0.sql');
+if (fs.existsSync(migrate3Path)) {
+    console.log('🔄 Running Migration 3.0...');
+    const migrate3 = fs.readFileSync(migrate3Path, 'utf-8');
+    try {
+        db.exec(migrate3);
+        console.log('✅ Migration 3.0 complete');
+    } catch (err) {
+        const error = err as Error;
+        if (!error.message.includes('duplicate column name') && !error.message.includes('already exists')) {
+            console.error('❌ Migration 3.0 failed:', error.message);
+        } else {
+            console.log('✅ Migration 3.0 already applied');
+        }
+    }
+}
+
 // Seed meta defaults (FAZ 3: added active_symbol, paper_equity_usdt)
 const metaDefaults: Record<string, string> = {
     mode: process.env.MODE || 'PAPER',

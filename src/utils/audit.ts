@@ -24,27 +24,29 @@ export type AuditAction =
 export interface AuditLogEntry {
     id: string;
     ts: number;
+    user_id: string | null;
     scope: AuditScope;
     action: AuditAction;
     payload: Record<string, unknown>;
 }
 
-export function logAudit(scope: AuditScope, action: AuditAction, payload: Record<string, unknown>): void {
+export function logAudit(scope: AuditScope, action: AuditAction, payload: Record<string, unknown>, userId?: string): void {
     const id = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`;
     const ts = Math.floor(Date.now() / 1000);
 
     db.prepare(`
-        INSERT INTO audit_log (id, ts, scope, action, payload_json)
-        VALUES (?, ?, ?, ?, ?)
-    `).run(id, ts, scope, action, JSON.stringify(payload));
+        INSERT INTO audit_log (id, ts, user_id, scope, action, payload_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, ts, userId || null, scope, action, JSON.stringify(payload));
 }
 
-export function getAuditLogs(limit: number = 50): AuditLogEntry[] {
+export function getAuditLogs(userId: string, limit: number = 50): AuditLogEntry[] {
     const rows = db.prepare(`
-        SELECT * FROM audit_log ORDER BY ts DESC LIMIT ?
-    `).all(limit) as Array<{
+        SELECT * FROM audit_log WHERE user_id = ? OR user_id IS NULL ORDER BY ts DESC LIMIT ?
+    `).all(userId, limit) as Array<{
         id: string;
         ts: number;
+        user_id: string | null;
         scope: string;
         action: string;
         payload_json: string;
@@ -53,6 +55,7 @@ export function getAuditLogs(limit: number = 50): AuditLogEntry[] {
     return rows.map(row => ({
         id: row.id,
         ts: row.ts,
+        user_id: row.user_id,
         scope: row.scope as AuditScope,
         action: row.action as AuditAction,
         payload: JSON.parse(row.payload_json),
